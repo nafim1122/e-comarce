@@ -1,0 +1,22 @@
+/* postcss: tailwindcss */
+/* This file uses Tailwind's @tailwind and @apply directives. */
+/* postcss: tailwindcss */
+/* stylelint-disable at-rule-no-unknown */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,body,#__next {
+  height: 100%;
+}
+
+body {
+  /* Tailwind classes applied at build time; provide safe CSS fallback for editors */
+  background-color: #f9fafb; /* bg-gray-50 */
+  color: #1f2937; /* text-gray-800 */
+}
+
+/* Dark mode fallback (will be overridden by tailwind dark classes in production) */
+@media (prefers-color-scheme: dark) {
+  body { background-color: #0f172a; color: #f3f4f6; }
+}

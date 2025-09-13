@@ -1,0 +1,36 @@
+{
+  "name": "e-comarce-admin-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "14.2.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "@reduxjs/toolkit": "1.9.5",
+    "react-redux": "8.1.1",
+    "zustand": "4.4.0",
+    "axios": "1.4.0",
+    "framer-motion": "10.12.16",
+    "recharts": "2.6.2",
+    "jwt-decode": "3.1.2",
+    "clsx": "1.2.1",
+    "swr": "2.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.4.2",
+    "@types/react": "18.2.28",
+    "@types/react-dom": "18.2.11",
+    "autoprefixer": "10.4.14",
+    "postcss": "8.4.24",
+    "tailwindcss": "4.3.1",
+    "typescript": "5.5.6",
+    "eslint": "8.51.0",
+    "eslint-config-next": "14.2.0"
+  }
+}

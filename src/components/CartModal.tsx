@@ -8,8 +8,8 @@ interface CartModalProps {
   onClose: () => void;
   cart: CartItem[];
   products: Product[];
-  onUpdateQuantity: (productId: number, quantity: number) => void;
-  onRemoveItem: (productId: number) => void;
+  onUpdateQuantity: (productId: number | string, quantity: number, unit?: 'kg'|'piece') => void;
+  onRemoveItem: (productId: number | string, unit?: 'kg'|'piece') => void;
   onCheckout: () => void;
   total: number;
 }
@@ -31,9 +31,19 @@ const CartModal: React.FC<CartModalProps> = ({
     product: products.find(p => p.id === item.productId)!
   }));
 
+  const money = (v: number) => {
+    try {
+  return new Intl.NumberFormat('bn-BD', { style: 'currency', currency: 'BDT', maximumFractionDigits: 2 }).format(v);
+    } catch (e) {
+  return `${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })} BDT`;
+    }
+  };
+  const MAX_PIECES = 999;
+  const MAX_KG = 5; // max 5 kg per line as requested
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-end">
-      <div className="bg-white w-full max-w-md h-full shadow-2xl flex flex-col animate-slide-in-right">
+      <div className="bg-white w-full max-w-md h-full shadow-2xl flex flex-col animate-slide-in-right rounded-l-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div className="flex items-center gap-2">
@@ -50,7 +60,7 @@ const CartModal: React.FC<CartModalProps> = ({
         </div>
 
         {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto p-6">
+  <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-gray-300">
           {cart.length === 0 ? (
             <div className="text-center py-12">
               <ShoppingBag className="h-16 w-16 text-gray-300 mx-auto mb-4" />
@@ -59,8 +69,8 @@ const CartModal: React.FC<CartModalProps> = ({
             </div>
           ) : (
             <div className="space-y-4">
-              {cartWithProducts.map(({ productId, quantity, product }) => (
-                <div key={productId} className="bg-gray-50 rounded-lg p-4">
+              {cartWithProducts.map(({ productId, quantity, product, unit, unitPriceAtTime, totalPriceAtTime, serverId, selectedWeight, count }) => (
+                <div key={`${productId}-${unit}-${serverId || ''}`} className="bg-gray-50 rounded-lg p-4 hover:shadow-md transition-shadow">
                   <div className="flex items-start gap-4">
                     <img
                       src={product.img}
@@ -71,46 +81,109 @@ const CartModal: React.FC<CartModalProps> = ({
                       <h3 className="font-semibold text-gray-800 mb-1 line-clamp-2">
                         {product.name}
                       </h3>
-                      <p className="text-green-600 font-semibold mb-2">
-                        ৳{product.price} each
+                      <p className="text-green-600 font-semibold mb-2 text-sm">
+                        {unit === 'kg' ? `${quantity} kg` : `${quantity} pcs`} – {money((() => {
+                          try {
+                            // Prefer server-provided unitPriceAtTime when available
+                            if (typeof unitPriceAtTime === 'number') return unitPriceAtTime;
+                            // Fallback to totalPriceAtTime/quantity if available
+                            if (typeof totalPriceAtTime === 'number' && quantity > 0) return Math.round((totalPriceAtTime / quantity) * 100) / 100;
+                            // If tiers exist, compute effective unit price per kg
+                            const tiers = (product.priceTiers as Array<{ minTotalWeight: number; pricePerKg: number }> | undefined) || undefined;
+                            if (tiers && tiers.length && unit === 'kg') {
+                              const totalGrams = quantity * 1000;
+                              const sorted = [...tiers].sort((a,b)=>a.minTotalWeight - b.minTotalWeight);
+                              let chosen = sorted[0];
+                              for (const t of sorted) if (t.minTotalWeight <= totalGrams) chosen = t;
+                              const pricePerKg = chosen.pricePerKg;
+                              return Math.round(pricePerKg * 100) / 100;
+                            }
+                            // Fallback: prefer product.basePricePerKg for kg unit
+                            if (unit === 'kg') return product.basePricePerKg ?? product.price ?? 0;
+                            return product.price ?? 0;
+                          } catch (e) { /* ignore */ }
+                          return product.price ?? 0;
+                        })())} each
                       </p>
                       
                       {/* Quantity Controls */}
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => onUpdateQuantity(productId, quantity - 1)}
+                            onClick={() => {
+                              if (unit === 'kg') {
+                                const currentCount = count ?? Math.round((quantity / (selectedWeight || 0.5)) || 1);
+                                const nextCount = Math.max(1, currentCount - 1);
+                                const sendQuantity = Number(((selectedWeight ?? 0.5) * nextCount));
+                                onUpdateQuantity(productId, sendQuantity, unit);
+                              } else {
+                                const next = Math.max(1, Math.floor((Number(quantity) || 0) - 1));
+                                onUpdateQuantity(productId, next, unit);
+                              }
+                            }}
                             className="p-1 hover:bg-gray-200 rounded-full transition-colors"
                             title="Decrease quantity"
                           >
                             <Minus className="h-4 w-4 text-gray-600" />
                           </button>
                           <span className="font-semibold px-3 py-1 bg-white rounded-lg min-w-[3rem] text-center">
-                            {quantity}
+                            {unit === 'kg' ? `${count ?? Math.round((quantity / (selectedWeight || 0.5)) || 1)} × ${selectedWeight ?? 0.5}kg` : quantity}
                           </span>
                           <button
-                            onClick={() => onUpdateQuantity(productId, quantity + 1)}
+                            onClick={() => {
+                              if (unit === 'kg') {
+                                const currentCount = count ?? Math.round((quantity / (selectedWeight || 0.5)) || 1);
+                                const nextCount = currentCount + 1;
+                                const sendQuantity = Number(((selectedWeight ?? 0.5) * nextCount));
+                                onUpdateQuantity(productId, Math.min(product.maxQuantity ?? 5, sendQuantity), unit);
+                              } else {
+                                const next = Math.min(MAX_PIECES, Math.ceil((Number(quantity) || 0) + 1));
+                                onUpdateQuantity(productId, next, unit);
+                              }
+                            }}
                             className="p-1 hover:bg-gray-200 rounded-full transition-colors"
                             title="Increase quantity"
+                            disabled={(product.unit === 'piece' && quantity >= MAX_PIECES) || (product.unit !== 'piece' && (quantity) >= MAX_KG)}
                           >
                             <Plus className="h-4 w-4 text-gray-600" />
                           </button>
                         </div>
                         
-                        <button
-                          onClick={() => onRemoveItem(productId)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
-                          title="Remove item"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                          <button
+                            onClick={() => onRemoveItem(productId, unit)}
+                            className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                            title="Remove item"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                       </div>
                       
                       {/* Subtotal */}
                       <div className="text-right mt-2">
-                        <span className="text-lg font-bold text-gray-800">
-                          ৳{product.price * quantity}
-                        </span>
+                        <span className="text-lg font-bold text-gray-800">{money((() => {
+                          try {
+                            // Prefer authoritative server total when present
+                            if (typeof totalPriceAtTime === 'number') return totalPriceAtTime;
+                            // If price tiers exist and unit is kg, compute from tiers
+                            const tiers = (product.priceTiers as Array<{ minTotalWeight: number; pricePerKg: number }> | undefined) || undefined;
+                            if (tiers && tiers.length && unit === 'kg') {
+                              const totalGrams = quantity * 1000;
+                              const sorted = [...tiers].sort((a,b)=>a.minTotalWeight - b.minTotalWeight);
+                              let chosen = sorted[0];
+                              for (const t of sorted) if (t.minTotalWeight <= totalGrams) chosen = t;
+                              const pricePerKg = chosen.pricePerKg;
+                              const linePrice = pricePerKg * quantity;
+                              return Math.round(linePrice * 100) / 100;
+                            }
+                            // Otherwise compute using basePricePerKg for kg or price for piece
+                            if (unit === 'kg') {
+                              const unitPrice = product.basePricePerKg ?? product.price ?? 0;
+                              return Math.round(unitPrice * quantity * 100) / 100;
+                            }
+                            return Math.round((product.price ?? 0) * quantity * 100) / 100;
+                          } catch (e) { /* ignore */ }
+                          return Math.round((product.price ?? 0) * quantity * 100) / 100;
+                        })())}</span>
                       </div>
                     </div>
                   </div>
