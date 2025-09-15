@@ -26,6 +26,48 @@ export const storage = getStorage(app);
 export const analytics = typeof window !== 'undefined' ? getAnalytics(app) : undefined;
 export const auth = getAuth(app);
 
+// Enhanced Firebase initialization with better error handling
+let authInitialized = false;
+let authRetryCount = 0;
+const MAX_AUTH_RETRIES = 3;
+
+const initializeAuth = async () => {
+  if (authInitialized) return;
+  
+  try {
+    await signInAnonymously(auth);
+    console.log('[Firebase] Signed in anonymously successfully');
+    authInitialized = true;
+    
+    // Dispatch success event for UI feedback
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('firebase-auth-success'));
+    }
+  } catch (error) {
+    const errorMessage = error && (error as Error).message ? (error as Error).message : String(error);
+    console.warn(`[Firebase] Anonymous sign-in failed (attempt ${authRetryCount + 1}/${MAX_AUTH_RETRIES}):`, errorMessage);
+    
+    // Retry with exponential backoff for transient errors
+    if (authRetryCount < MAX_AUTH_RETRIES) {
+      authRetryCount++;
+      const delay = Math.pow(2, authRetryCount) * 1000; // 2s, 4s, 8s
+      setTimeout(() => {
+        initializeAuth();
+      }, delay);
+    } else {
+      // After max retries, dispatch error for UI handling
+      if (typeof window !== 'undefined') {
+        const message = errorMessage.includes('permission') || errorMessage.includes('auth') 
+          ? 'Missing or insufficient permissions'
+          : 'Connection failed';
+        window.dispatchEvent(new CustomEvent('firebase-auth-error', { 
+          detail: { message, originalError: errorMessage } 
+        }));
+      }
+    }
+  }
+};
+
 if (import.meta.env.DEV) {
   const missing = Object.entries(firebaseConfig).filter(([_, v]) => !v).map(([k]) => k);
   if (missing.length) {
@@ -34,17 +76,13 @@ if (import.meta.env.DEV) {
   // Debug: show which project you're connected to (keys are public in frontend anyway)
   // Remove this log for production if desired.
   console.log('[Firebase] Using project:', firebaseConfig.projectId, 'authDomain:', firebaseConfig.authDomain);
-  // Try anonymous sign-in in dev so Firestore rules that allow authenticated users work locally.
-  try {
-    signInAnonymously(auth).then(() => {
-      console.log('[Firebase] Signed in anonymously for dev');
-    }).catch((e) => {
-      console.warn('[Firebase] Anonymous sign-in failed (dev):', e && (e as Error).message ? (e as Error).message : e);
-    });
-  } catch (e) {
-    console.warn('[Firebase] Anonymous sign-in threw', e);
-  }
+  
+  // Initialize authentication with retry logic
+  initializeAuth();
 }
+
+// Export the auth initialization function for manual retry
+export { initializeAuth };
 
 // Install Firebase using npm
 // Run the following command in your project directory:

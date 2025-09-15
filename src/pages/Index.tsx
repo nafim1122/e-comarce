@@ -19,6 +19,7 @@ import AdminPanel from '../components/AdminPanel';
 import { onProductsSnapshot } from '../lib/product';
 import { getSocket } from '../lib/socket';
 import LiveProductList from '../components/LiveProductList';
+import { initializeAuth } from '../lib/firebase';
 
 const Index = () => {
   // Start empty; we'll populate from backend or localStorage. This lets deletions persist (empty list allowed)
@@ -32,6 +33,12 @@ const Index = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
+  const [realtimeErrorDetails, setRealtimeErrorDetails] = useState<{
+    isPermissionError?: boolean;
+    isAuthError?: boolean;
+    retryExhausted?: boolean;
+    originalError?: string;
+  } | null>(null);
   const [runtimeForceLocal, setRuntimeForceLocal] = React.useState(false);
   // Feature flag: control whether Admin Panel is available (see VITE_ENABLE_ADMIN in .env)
   const enableAdmin = import.meta.env.VITE_ENABLE_ADMIN === 'true';
@@ -394,9 +401,44 @@ const Index = () => {
         const msg = detail && detail.message ? String(detail.message) : 'Realtime listener error';
         console.warn('[Index] products-snapshot-error', msg);
         setRealtimeError(msg);
+        setRealtimeErrorDetails({
+          isPermissionError: detail?.isPermissionError || false,
+          isAuthError: detail?.isAuthError || false,
+          retryExhausted: detail?.retryExhausted || false,
+          originalError: detail?.originalError || msg
+        });
       } catch (err) { /* ignore */ }
     };
     window.addEventListener('products-snapshot-error', onProductsSnapshotError as EventListener);
+
+    // Handle successful auth and clear errors
+    const onAuthSuccess = () => {
+      setRealtimeError(null);
+      setRealtimeErrorDetails(null);
+    };
+    window.addEventListener('firebase-auth-success', onAuthSuccess);
+
+    // Handle auth errors
+    const onAuthError = (e: Event) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const detail = (e as CustomEvent).detail as any;
+        const msg = detail && detail.message ? String(detail.message) : 'Authentication failed';
+        setRealtimeError(msg);
+        setRealtimeErrorDetails({
+          isAuthError: true,
+          originalError: detail?.originalError || msg
+        });
+      } catch (err) { /* ignore */ }
+    };
+    window.addEventListener('firebase-auth-error', onAuthError);
+
+    // Handle successful snapshot and clear errors
+    const onSnapshotSuccess = () => {
+      setRealtimeError(null);
+      setRealtimeErrorDetails(null);
+    };
+    window.addEventListener('products-snapshot-success', onSnapshotSuccess);
 
     const socket = getSocket();
   type SocketProduct = { _id?: string; id?: string; name: string; price: number; oldPrice?: number; photo?: string; img?: string; description?: string; category?: string; inStock?: boolean; basePricePerKg?: number; unit?: string };
@@ -464,6 +506,9 @@ const Index = () => {
       window.removeEventListener('products-local-update', localUpdateHandler);
   window.removeEventListener('products-snapshot', onProductsSnapshotEvent as EventListener);
   window.removeEventListener('products-snapshot-error', onProductsSnapshotError as EventListener);
+      window.removeEventListener('firebase-auth-success', onAuthSuccess);
+      window.removeEventListener('firebase-auth-error', onAuthError);
+      window.removeEventListener('products-snapshot-success', onSnapshotSuccess);
       socket.off('product:created', onCreated);
       socket.off('product:updated', onUpdated);
       socket.off('product:deleted', onDeleted);
@@ -721,6 +766,18 @@ const Index = () => {
     return () => document.removeEventListener('click', handleOutsideClick);
   }, [isMobileMenuOpen]);
 
+  // Function to retry Firebase connection
+  const handleRetryConnection = async () => {
+    setRealtimeError(null);
+    setRealtimeErrorDetails(null);
+    try {
+      await initializeAuth();
+      toast.success('Attempting to reconnect...');
+    } catch (error) {
+      toast.error('Retry failed. Please check your connection.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-orange-50">
       {/* Navigation */}
@@ -903,16 +960,64 @@ const Index = () => {
         </div>
       )}
 
-      {/* Realtime error banner (dismissible) */}
+      {/* Enhanced realtime error banner with retry functionality */}
       {realtimeError && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
-          <div className="rounded-md bg-red-100 border border-red-200 text-red-800 p-3 flex items-start justify-between">
-            <div>
-              <strong className="block">Realtime sync issue</strong>
-              <div className="text-sm">{realtimeError}. The site will continue using local cache until this is resolved.</div>
+          <div className={`rounded-md border p-3 flex items-start justify-between ${
+            realtimeErrorDetails?.isPermissionError 
+              ? 'bg-red-100 border-red-200 text-red-800' 
+              : 'bg-yellow-100 border-yellow-200 text-yellow-800'
+          }`}>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <strong className="block">
+                  {realtimeErrorDetails?.isPermissionError ? 'Permission Error' : 'Realtime Sync Issue'}
+                </strong>
+                {!realtimeErrorDetails?.isPermissionError && !realtimeErrorDetails?.retryExhausted && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Retrying...</span>
+                )}
+              </div>
+              <div className="text-sm mb-2">
+                {realtimeError}. The site will continue using local cache until this is resolved.
+              </div>
+              {realtimeErrorDetails?.isPermissionError && (
+                <div className="text-xs opacity-80 mb-2">
+                  This may be due to Firestore security rules or missing authentication. 
+                  Check your Firebase project configuration.
+                </div>
+              )}
+              {realtimeErrorDetails?.isAuthError && (
+                <div className="text-xs opacity-80 mb-2">
+                  Authentication failed. Attempting to reconnect...
+                </div>
+              )}
             </div>
-            <div className="ml-4">
-              <button onClick={() => setRealtimeError(null)} className="text-red-700 hover:text-red-900 font-semibold">Dismiss</button>
+            <div className="ml-4 flex gap-2">
+              {!realtimeErrorDetails?.isPermissionError && (
+                <button 
+                  onClick={handleRetryConnection}
+                  className={`text-sm px-3 py-1 rounded transition-colors ${
+                    realtimeErrorDetails?.isPermissionError 
+                      ? 'bg-red-200 hover:bg-red-300 text-red-900' 
+                      : 'bg-yellow-200 hover:bg-yellow-300 text-yellow-900'
+                  }`}
+                >
+                  Retry
+                </button>
+              )}
+              <button 
+                onClick={() => {
+                  setRealtimeError(null);
+                  setRealtimeErrorDetails(null);
+                }}
+                className={`text-sm font-semibold transition-colors ${
+                  realtimeErrorDetails?.isPermissionError 
+                    ? 'text-red-700 hover:text-red-900' 
+                    : 'text-yellow-700 hover:text-yellow-900'
+                }`}
+              >
+                Dismiss
+              </button>
             </div>
           </div>
         </div>

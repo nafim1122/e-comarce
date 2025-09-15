@@ -43,22 +43,72 @@ export async function deleteProduct(id: string) {
   }
 }
 
-export function listenProducts(onChange: (items: Product[]) => void, onError?: (e: Error) => void) {
-  try {
-    const q = query(productsCollection(), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, snap => {
-  const items: Product[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as DocumentData) })) as unknown as Product[];
-      onChange(items);
-    }, e => {
-      console.error('[listenProducts] snapshot error', e);
-      if (onError) onError(e);
-    });
-    return unsub;
-  } catch (err) {
-    console.error('[listenProducts] setup error', err);
-    if (onError) onError(err);
-    return () => {};
-  }
+export function listenProducts(onChange: (items: Product[]) => void, onError?: (e: Error) => void, maxRetries: number = 3) {
+  let retryCount = 0;
+  let unsubscribe: (() => void) | undefined;
+
+  const attachListener = () => {
+    try {
+      const q = query(productsCollection(), orderBy('createdAt', 'desc'));
+      console.debug('[listenProducts] attaching listener (attempt', retryCount + 1, ')');
+      
+      unsubscribe = onSnapshot(q, snap => {
+        const items: Product[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as DocumentData) })) as unknown as Product[];
+        onChange(items);
+        
+        // Clear any previous error state on successful data
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('products-snapshot-success'));
+        }
+      }, e => {
+        console.error('[listenProducts] snapshot error', e);
+        const errorMessage = e && (e as Error).message ? (e as Error).message : String(e);
+        
+        // Check if it's a permission error
+        const isPermissionError = errorMessage.includes('permission') || 
+                                 errorMessage.includes('PERMISSION_DENIED') ||
+                                 errorMessage.includes('insufficient permissions');
+        
+        // Don't retry permission errors, but retry transient connection issues
+        if (!isPermissionError && retryCount < maxRetries) {
+          retryCount++;
+          const delay = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s
+          console.log(`[listenProducts] retrying in ${delay}ms (attempt ${retryCount}/${maxRetries})`);
+          setTimeout(attachListener, delay);
+          return;
+        }
+
+        if (onError) onError(e);
+      });
+      
+      return unsubscribe;
+    } catch (err) {
+      console.error('[listenProducts] setup error', err);
+      
+      // Retry setup errors too
+      if (retryCount < maxRetries) {
+        retryCount++;
+        const delay = Math.pow(2, retryCount) * 1000;
+        console.log(`[listenProducts] retrying setup in ${delay}ms`);
+        setTimeout(attachListener, delay);
+        return () => {};
+      }
+
+      if (onError) onError(err as Error);
+      return () => {};
+    }
+  };
+
+  // Start the initial connection attempt
+  attachListener();
+
+  // Return unsubscribe function
+  return () => {
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = undefined;
+    }
+  };
 }
 
 export async function getProduct(id: string) {
