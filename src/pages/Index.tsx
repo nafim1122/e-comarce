@@ -16,7 +16,7 @@ import CartModal from '../components/CartModal';
 import PaymentModal from '../components/PaymentModal';
 import OrderHistory from '../components/OrderHistory';
 import AdminPanel from '../components/AdminPanel';
-import { onProductsSnapshot } from '../lib/product';
+import { listenProducts } from '../lib/firestore-products';
 import { getSocket } from '../lib/socket';
 import LiveProductList from '../components/LiveProductList';
 
@@ -117,7 +117,7 @@ const Index = () => {
     // *not* apply one-time API fetch results to avoid overwriting snapshot-driven updates.
     let realtimeAttached = false;
     try {
-  unsubscribeProducts = onProductsSnapshot((list) => {
+  unsubscribeProducts = listenProducts((list) => {
         realtimeAttached = true;
         if (Array.isArray(list)) {
           try { console.debug('[Index] onSnapshot received', { size: list.length, ids: list.map(p => p.id) }); } catch (e) { /* ignore */ }
@@ -204,6 +204,9 @@ const Index = () => {
             try { localStorage.setItem('products', JSON.stringify(list)); } catch {/* ignore */}
           }
         }
+      }, (error) => {
+        console.error('[Index] Firestore listener error:', error);
+        setRealtimeError(error.message || 'Failed to load products');
       });
     } catch (err) {
       console.warn('[Index] realtime products listener failed to attach', err);
