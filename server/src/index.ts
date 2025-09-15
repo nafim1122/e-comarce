@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
-import { Server as SocketIOServer, Socket } from 'socket.io';
+import { Server as SocketIOServer } from 'socket.io';
+import { initializeSocketIO } from './socket';
 
 declare global { // top-level global augmentation
   // eslint-disable-next-line no-var
@@ -27,20 +28,16 @@ async function start() {
   await seedAdminIfNeeded();
   const app = express();
   const server = http.createServer(app);
-  const io = new SocketIOServer(server, {
-    cors: { origin: ['http://localhost:5173','http://localhost:8080', process.env.FRONTEND_ORIGIN || ''].filter(Boolean), credentials: true }
-  });
-  globalThis.io = io;
-  io.on('connection', (socket: Socket) => {
-    socket.emit('connected', { ts: Date.now() });
-  });
+  const io = initializeSocketIO(server);
 
   const uploadsDir = path.join(process.cwd(), 'server', 'uploads');
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
   app.use(cors({
     origin: (origin, cb) => {
-      if (!origin || origin.startsWith('http://localhost')) return cb(null, origin);
+      // Allow no-origin (server-to-server) and localhost/127.0.0.1 during dev.
+      if (!origin) return cb(null, origin);
+      if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) return cb(null, origin);
       return cb(new Error('Not allowed by CORS'));
     },
     credentials: true
@@ -65,7 +62,11 @@ async function start() {
   app.use(notFound);
   app.use(errorHandler);
 
-  server.listen(env.PORT, () => console.log(`API + WS listening on http://localhost:${env.PORT}`));
+  const port = parseInt(String(env.PORT), 10) || 5000;
+  // Bind explicitly to IPv4 loopback to avoid Node/OS picking an IPv6-only address
+  server.listen(port, '127.0.0.1', () => {
+    console.log(`API + WS listening on http://127.0.0.1:${port}`);
+  });
 }
 
 start().catch(err => {

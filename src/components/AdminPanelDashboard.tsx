@@ -1,4 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import imageCompression from 'browser-image-compression'
+import { storage } from "../lib/firebase";
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 // We keep Firestore orders for now; products switched to backend API
 import { getOrders, deleteOrder, updateOrderStatus } from "../lib/order";
 import { addProduct as addProductFirestore, fetchProducts as fetchProductsFirestore, updateProduct as updateProductFirestore, deleteProduct as deleteProductFirestore } from '../lib/product';
@@ -563,13 +566,17 @@ export default function AdminPanelDashboard() {
                   <input className="border rounded-md px-3 py-2 text-sm" placeholder="1kg multiplier (e.g. 1.1)" type="number" value={form.preset1 || ''} onChange={e=>setForm(f=>({...f,preset1:e.target.value}))} />
                   <input className="border rounded-md px-3 py-2 text-sm" placeholder="Image URL" value={form.img} onChange={e=>setForm(f=>({...f,img:e.target.value}))} />
                   <div className="flex flex-col gap-2 md:col-span-2 lg:col-span-2">
-                    <input type="file" accept="image/*" aria-label="Upload image" title="Upload image" onChange={e=>{
+                    <input type="file" accept="image/*" aria-label="Upload image" title="Upload image" onChange={async e=>{
                       const file = e.target.files?.[0];
                       if (file) {
-                        const reader = new FileReader();
-                        reader.onload = ev => setPreview(ev.target?.result as string);
-                        reader.readAsDataURL(file);
-                      } else { setPreview(null); }
+                        // Compress and upload to Firebase Storage to avoid storing large base64
+                        const url = await compressAndUpload(file);
+                        setPreview(url);
+                        setForm(f=>({...f, img: url}));
+                      } else {
+                        setPreview(null);
+                        setForm(f=>({...f, img: ''}));
+                      }
                     }} className="border rounded-md px-3 py-2 text-sm" />
                     {preview && <img src={preview} alt="Preview" className="h-32 w-32 object-cover rounded border" />}
                   </div>
@@ -837,6 +844,25 @@ function dataUrlToBlob(dataUrl: string): Blob {
   const bytes = new Uint8Array(len);
   for (let i=0;i<len;i++) bytes[i] = bin.charCodeAt(i);
   return new Blob([bytes], { type: mime });
+}
+
+// Compress and upload a file to Firebase Storage, return public URL
+async function compressAndUpload(file: File): Promise<string> {
+  try {
+    const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true };
+    // browser-image-compression returns a Blob; use original filename for storage path
+    const compressed = await imageCompression(file, options) as Blob;
+    const filename = file.name.replace(/\s+/g, '_');
+    const path = `products/${Date.now()}_${filename}`;
+    const ref = storageRef(storage, path);
+    await uploadBytes(ref, compressed);
+    const url = await getDownloadURL(ref);
+    return url;
+  } catch (e) {
+    console.warn('[CompressUploadFail]', e);
+    // Fallback: create object URL so admin still sees preview (not persisted)
+    return URL.createObjectURL(file);
+  }
 }
 
 async function addProductAPI(base: string, product: Partial<Product>): Promise<Product> {

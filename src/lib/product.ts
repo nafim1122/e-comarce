@@ -1,6 +1,6 @@
 // Product record functions using Firestore
 import { db } from "./firebase";
-import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from "firebase/firestore";
 import { Product } from "../types";
 
 interface FirestoreProduct {
@@ -16,10 +16,24 @@ interface FirestoreProduct {
   unit?: string;
 }
 
+export function isForceLocal() {
+  try {
+    // Prefer Node env for tests, fallback to import.meta.env for Vite
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const node = typeof process !== 'undefined' ? (process.env as any) : undefined;
+    if (node && node.VITE_FORCE_LOCAL === 'true') return true;
+    // import.meta.env may be undefined in Node tests
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const metaEnv = (import.meta as any)?.env as Record<string, string | undefined> | undefined;
+    return metaEnv?.VITE_FORCE_LOCAL === 'true';
+  } catch (e) {
+    return false;
+  }
+}
+
 export async function addProduct(product: Omit<Product, "id">) {
   // Dev/test fallback: allow disabling Firestore via VITE_FORCE_LOCAL env var
-  const metaEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
-  const forceLocal = metaEnv?.VITE_FORCE_LOCAL === 'true';
+  const forceLocal = isForceLocal();
   if (typeof window !== 'undefined' && forceLocal) {
     try {
       const key = 'products';
@@ -36,7 +50,7 @@ export async function addProduct(product: Omit<Product, "id">) {
     }
   }
   // Firestore rejects undefined values — strip them out before writing.
-  const payload: Record<string, unknown> = { createdAt: Date.now() };
+  const payload: Record<string, unknown> = { createdAt: serverTimestamp() };
   Object.keys(product).forEach((k) => {
     const val = (product as Record<string, unknown>)[k];
     if (val !== undefined) payload[k] = val;
@@ -47,8 +61,7 @@ export async function addProduct(product: Omit<Product, "id">) {
 
 export async function getProducts(): Promise<Product[]> {
   // Dev/test fallback when Firestore disabled
-  const metaEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
-  const forceLocal = metaEnv?.VITE_FORCE_LOCAL === 'true';
+  const forceLocal = isForceLocal();
   if (typeof window !== 'undefined' && forceLocal) {
     try {
       const raw = localStorage.getItem('products');
@@ -83,8 +96,7 @@ export async function fetchProducts(): Promise<Product[]> {
 }
 
 export async function updateProduct(id: string, updates: Partial<Product>) {
-  const metaEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
-  const forceLocal = metaEnv?.VITE_FORCE_LOCAL === 'true';
+  const forceLocal = isForceLocal();
   if (typeof window !== 'undefined' && forceLocal) {
     try {
       const key = 'products';
@@ -100,8 +112,7 @@ export async function updateProduct(id: string, updates: Partial<Product>) {
 }
 
 export async function deleteProduct(id: string) {
-  const metaEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
-  const forceLocal = metaEnv?.VITE_FORCE_LOCAL === 'true';
+  const forceLocal = isForceLocal();
   if (typeof window !== 'undefined' && forceLocal) {
     try {
       const key = 'products';
@@ -119,8 +130,7 @@ export async function deleteProduct(id: string) {
 // Subscribe to realtime updates for products collection.
 // Returns an unsubscribe function.
 export function onProductsSnapshot(cb: (products: Product[]) => void) {
-  const metaEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
-  const forceLocal = metaEnv?.VITE_FORCE_LOCAL === 'true';
+  const forceLocal = isForceLocal();
   if (typeof window !== 'undefined' && forceLocal) {
     try {
       const raw = localStorage.getItem('products');
@@ -135,8 +145,8 @@ export function onProductsSnapshot(cb: (products: Product[]) => void) {
     return () => {};
   }
   try {
-  const colRef = collection(db, 'products');
-  console.debug('[onProductsSnapshot] attaching listener to products collection');
+  const colRef = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
+  console.debug('[onProductsSnapshot] attaching listener to products collection (ordered by createdAt desc)');
   const unsub = onSnapshot(colRef, (snapshot) => {
     const list: Product[] = snapshot.docs.map(d => {
         const data = d.data() as FirestoreProduct;

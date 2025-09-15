@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { Product } from '../models/Product';
+import { emitProductUpdate } from '../socket';
 
 interface MulterRequest extends Request {
   file?: Express.Multer.File;
@@ -43,7 +44,23 @@ export async function addProductController(req: Request, res: Response) {
   if (maxQNum !== undefined && (Number.isNaN(maxQNum) || maxQNum < 0)) { const err = new Error('Invalid maxQuantity') as Error & { status?: number }; err.status = 400; throw err; }
   if (minQNum !== undefined && maxQNum !== undefined && minQNum > maxQNum) { const err = new Error('minQuantity cannot be greater than maxQuantity') as Error & { status?: number }; err.status = 400; throw err; }
   const product = await Product.create({ name, description, price: priceNum, oldPrice: oldPriceNum, category, inStock: inStock === 'true' || inStock === true, photo: photoPath, priceTiers, basePricePerKg: priceNum, unit: unitValue, kgStep: kgStepNum, minQuantity: minQNum, maxQuantity: maxQNum });
-  if (globalThis.io) globalThis.io.emit('product:created', { _id: product._id, name: product.name, price: product.price, oldPrice: product.oldPrice, photo: product.photo, img: product.photo, description: product.description, category: product.category, inStock: product.inStock, basePricePerKg: product.basePricePerKg, unit: product.unit, kgStep: product.kgStep, minQuantity: product.minQuantity, maxQuantity: product.maxQuantity });
+  // Emit socket event for real-time updates
+  emitProductUpdate('add', { 
+    _id: product._id, 
+    name: product.name, 
+    price: product.price, 
+    oldPrice: product.oldPrice, 
+    photo: product.photo, 
+    img: product.photo, 
+    description: product.description, 
+    category: product.category, 
+    inStock: product.inStock, 
+    basePricePerKg: product.basePricePerKg, 
+    unit: product.unit, 
+    kgStep: product.kgStep, 
+    minQuantity: product.minQuantity, 
+    maxQuantity: product.maxQuantity 
+  });
   res.status(201).json(product);
 }
 
@@ -54,7 +71,8 @@ export async function deleteProductController(req: Request, res: Response) {
     err.status = 404;
     throw err;
   }
-  if (globalThis.io) globalThis.io.emit('product:deleted', { id: req.params.id });
+  // Emit socket event for real-time updates
+  emitProductUpdate('delete', req.params.id);
   res.json({ message: 'Deleted' });
 }
 
@@ -89,6 +107,22 @@ export async function editProductController(req: Request, res: Response) {
     err.status = 404;
     throw err;
   }
-  if (globalThis.io) globalThis.io.emit('product:updated', { _id: product._id, name: product.name, price: product.price, oldPrice: product.oldPrice, photo: product.photo, img: product.photo, description: product.description, category: product.category, inStock: product.inStock, basePricePerKg: product.basePricePerKg, unit: product.unit, kgStep: product.kgStep, minQuantity: product.minQuantity, maxQuantity: product.maxQuantity });
+  // Emit socket event for real-time updates
+  emitProductUpdate('update', { 
+    _id: product._id, 
+    name: product.name, 
+    price: product.price, 
+    oldPrice: product.oldPrice, 
+    photo: product.photo, 
+    img: product.photo, 
+    description: product.description, 
+    category: product.category, 
+    inStock: product.inStock, 
+    basePricePerKg: product.basePricePerKg, 
+    unit: product.unit, 
+    kgStep: product.kgStep, 
+    minQuantity: product.minQuantity, 
+    maxQuantity: product.maxQuantity 
+  });
   res.json(product);
 }
