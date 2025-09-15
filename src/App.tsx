@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
+import ProductDemo from "./pages/ProductDemo";
 import UserForm from "./components/UserForm";
 import UserList from "./components/UserList";
 import OrderForm from "./components/OrderForm";
@@ -33,6 +34,7 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/product-demo" element={<ProductDemo />} />
             <Route path="/user" element={<UserForm />} />
             <Route path="/users" element={<UserList />} />
             <Route path="/order" element={<OrderForm />} />
