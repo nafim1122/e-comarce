@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcrypt';
-import { Admin } from '../models/Admin';
-import { env } from '../config/env';
+import { Admin } from '../src/models/Admin';
+import { env } from '../src/config/env';
 
 async function main() {
   const argv = process.argv.slice(2);
