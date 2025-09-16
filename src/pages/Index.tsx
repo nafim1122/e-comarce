@@ -692,17 +692,33 @@ const Index = () => {
       )
     : products;
 
-  const handleAdminLogin = (credentials: { username: string; password: string }) => {
-    // Security: Simple authentication (in production, use proper backend authentication)
+  const handleAdminLogin = async (credentials: { username: string; password: string }) => {
+    // Try backend login first
     const sanitizedUsername = sanitizeInput(credentials.username);
     const sanitizedPassword = sanitizeInput(credentials.password);
-  // Legacy panel credentials now configurable via env (fallback to requested values)
-  const legacyUser = (import.meta.env.VITE_LEGACY_ADMIN_USER || 'rahat').toLowerCase();
-  const legacyPass = import.meta.env.VITE_LEGACY_ADMIN_PASS || 'rahat22';
-
-  if (sanitizedUsername.toLowerCase() === legacyUser && sanitizedPassword === legacyPass) {
+    const backendEmail = sanitizedUsername;
+    const backendPassword = sanitizedPassword;
+    try {
+      const res = await fetch(`${API_BASE}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: backendEmail, password: backendPassword })
+      });
+      if (res.ok) {
+        setIsAuthenticated(true);
+        toast.success('Admin login successful');
+        return;
+      }
+    } catch (err) {
+      // ignore, fallback to legacy
+    }
+    // Fallback to legacy env credentials
+    const legacyUser = (import.meta.env.VITE_LEGACY_ADMIN_USER || 'rahat').toLowerCase();
+    const legacyPass = import.meta.env.VITE_LEGACY_ADMIN_PASS || 'rahat22';
+    if (sanitizedUsername.toLowerCase() === legacyUser && sanitizedPassword === legacyPass) {
       setIsAuthenticated(true);
-      toast.success('Admin login successful');
+      toast.success('Admin login successful (legacy)');
     } else {
       toast.error('Invalid credentials');
     }
