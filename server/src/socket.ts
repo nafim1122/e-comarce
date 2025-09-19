@@ -11,7 +11,7 @@ export function initializeSocketIO(server: http.Server) {
     cors: {
       origin: process.env.NODE_ENV === 'production' 
         ? false 
-        : ['http://localhost:5173', 'http://localhost:3000'],
+        : ['http://localhost:5173', 'https://localhost:5173', 'http://localhost:3000'],
       credentials: true
     },
     pingTimeout: 60000
