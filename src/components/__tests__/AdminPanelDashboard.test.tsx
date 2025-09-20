@@ -19,6 +19,8 @@ vi.mock('firebase/analytics', () => ({
 
 vi.mock('@/lib/firebase', () => ({
   auth: {},
+  // Minimal db export to satisfy modules that import `db` in tests
+  db: {},
 }));
 
 // Hoist-safe test state for auth mock. The mock factory reads this at runtime

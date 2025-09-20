@@ -55,7 +55,7 @@ vi.mock('@/lib/dev-sync', () => ({ simulateServerCreatedProduct: vi.fn() }));
 // UI and firebase mocks
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 vi.mock('firebase/auth', () => ({ getAuth: () => ({}), onAuthStateChanged: vi.fn(), signInAnonymously: vi.fn(() => Promise.resolve()) }));
-vi.mock('@/lib/firebase', () => ({ auth: {} }));
+vi.mock('@/lib/firebase', () => ({ auth: {}, db: {} }));
 vi.mock('@/components/ui/card', () => ({
   Card: ({ children }: { children: React.ReactNode }) => React.createElement('div', { 'data-testid': 'card' }, children),
   CardContent: ({ children }: { children: React.ReactNode }) => React.createElement('div', { 'data-testid': 'card-content' }, children),
