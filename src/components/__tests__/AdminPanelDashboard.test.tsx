@@ -103,8 +103,8 @@ describe('AdminPanelDashboard', () => {
     __testAuthState.value = { isAdmin: false, loading: false, user: null };
     render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
 
-    // The component renders an Access Denied message for non-admins
-    expect(await screen.findByText(/You don't have permission to access the admin panel/i)).toBeInTheDocument();
+  // The component now shows an Admin Sign-in gate for non-admins
+  expect(await screen.findByText(/Admin Sign-in Required/i)).toBeInTheDocument();
   });
 
   it('shows loading state when auth is loading', async () => {

@@ -35,6 +35,10 @@ const AdminPanelDashboard: React.FC = () => {
   const [isBackendAuthenticated, setIsBackendAuthenticated] = useState(false);
   const [backendCredentials, setBackendCredentials] = useState({ email: '', password: '' });
   const [checkingBackendAuth, setCheckingBackendAuth] = useState(true);
+  // Local admin credential override (configurable via Vite env vars)
+  const ADMIN_EMAIL = (import.meta.env.VITE_ADMIN_EMAIL as string) || 'admin@example.com';
+  const ADMIN_PASSWORD = (import.meta.env.VITE_ADMIN_PASSWORD as string) || 'admin123';
+  const [isLocalAdminAuthenticated, setIsLocalAdminAuthenticated] = useState(false);
 
   // Check backend authentication status
   useEffect(() => {
@@ -55,6 +59,14 @@ const AdminPanelDashboard: React.FC = () => {
       setCheckingBackendAuth(false);
     }
   }, [isAdmin]);
+
+  // Restore any local admin override stored in this session
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('localAdminAuthenticated');
+      if (stored === '1') setIsLocalAdminAuthenticated(true);
+    } catch (e) { /* ignore */ }
+  }, []);
 
   // Load products and orders
   useEffect(() => {
@@ -84,6 +96,17 @@ const AdminPanelDashboard: React.FC = () => {
 
   const handleBackendLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Check against local admin credentials first (bypass backend)
+    if (
+      backendCredentials.email.trim().toLowerCase() === ADMIN_EMAIL.trim().toLowerCase() &&
+      backendCredentials.password === ADMIN_PASSWORD
+    ) {
+      setIsLocalAdminAuthenticated(true);
+      setIsBackendAuthenticated(true);
+      try { sessionStorage.setItem('localAdminAuthenticated', '1'); } catch (e) { /* ignore */ }
+      toast.success('Local admin authenticated');
+      return;
+    }
     try {
       const result = await backendLogin(
         undefined, 
@@ -165,19 +188,67 @@ const AdminPanelDashboard: React.FC = () => {
     );
   }
 
-  if (!isAdmin) {
+  // If the user is not a Firebase admin and hasn't authenticated with the local admin
+  // credentials, show a focused authentication gate so the admin email/password can be
+  // entered to gain access. This keeps the rest of the dashboard hidden from other users.
+  if (!(isAdmin || isLocalAdminAuthenticated)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center max-w-md mx-auto p-8">
-          <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Access Denied</h1>
-          <p className="text-gray-600 mb-6">You don't have permission to access the admin panel.</p>
-          <button
-            onClick={() => navigate('/')}
-            className="bg-amber-600 text-white px-6 py-2 rounded-lg hover:bg-amber-700 transition-colors"
-          >
-            Go Back to Home
-          </button>
+        <div className="w-full max-w-3xl mx-auto p-6">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+            <div className="flex items-start gap-3">
+              <Shield className="h-6 w-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-yellow-800 mb-2">Admin Sign-in Required</h3>
+                <p className="text-yellow-700 mb-4 text-sm">
+                  To access the admin dashboard, authenticate with the admin email and password.
+                </p>
+
+                <form onSubmit={handleBackendLogin} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-yellow-800 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={backendCredentials.email}
+                        onChange={(e) => setBackendCredentials(prev => ({ ...prev, email: e.target.value }))}
+                        className="w-full px-3 py-2 border border-yellow-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                        placeholder="admin@example.com"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-yellow-800 mb-1">Password</label>
+                      <input
+                        type="password"
+                        value={backendCredentials.password}
+                        onChange={(e) => setBackendCredentials(prev => ({ ...prev, password: e.target.value }))}
+                        className="w-full px-3 py-2 border border-yellow-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                        placeholder="••••••••"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="submit"
+                      className="bg-amber-600 text-white px-4 py-2 rounded-full hover:bg-amber-700 shadow-sm transition-transform transform hover:-translate-y-0.5"
+                    >
+                      Sign in as Admin
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/')}
+                      className="text-sm text-gray-600 underline"
+                    >
+                      Back to site
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">Note: Password is not shown here for security.</p>
+                </form>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
