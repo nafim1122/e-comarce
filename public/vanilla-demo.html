@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Management System - Vanilla JS</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        button.delete {
+            background-color: #f44336;
+        }
+        button.delete:hover {
+            background-color: #da190b;
+        }
+        .product-item {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #fafafa;
+        }
+        .product-info {
+            flex-grow: 1;
+        }
+        .product-name {
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .product-price {
+            color: #666;
+            margin: 5px 0;
+        }
+        .product-id {
+            color: #999;
+            font-size: 12px;
+        }
+        .error {
+            background-color: #fee;
+            color: #c00;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        .success {
+            background-color: #efe;
+            color: #060;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        .features {
+            background-color: #e8f5e8;
+            padding: 15px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Product Management System - Vanilla JavaScript + Firebase</h1>
+    
+    <div class="container">
+        <h2>Add New Product</h2>
+        <div id="message"></div>
+        
+        <form id="productForm">
+            <div class="form-group">
+                <label for="productName">Product Name:</label>
+                <input type="text" id="productName" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="productPrice">Price (৳):</label>
+                <input type="number" id="productPrice" min="0" step="0.01" required>
+            </div>
+            
+            <button type="submit" id="submitBtn">Add Product</button>
+        </form>
+    </div>
+
+    <div class="container">
+        <h2>Products <span id="productCount">(0)</span></h2>
+        <div id="productsList">
+            <p>Loading products...</p>
+        </div>
+    </div>
+
+    <div class="container features">
+        <h3>✅ Features Implemented:</h3>
+        <ul>
+            <li>✅ Add products to Firebase Firestore</li>
+            <li>✅ Real-time product updates</li>
+            <li>✅ Delete products</li>
+            <li>✅ Error handling with console logs</li>
+            <li>✅ Proper Firebase initialization</li>
+            <li>✅ Vanilla JavaScript implementation</li>
+        </ul>
+        
+        <h3>🔧 How to test:</h3>
+        <ol>
+            <li>Add a product using the form above</li>
+            <li>Open another browser tab to this same page</li>
+            <li>Add/delete products in one tab and see them update in real-time in the other tab</li>
+            <li>Check the browser console for detailed logs</li>
+        </ol>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        // Firebase configuration (using same config as React app)
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js';
+        import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from 'https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js';
+        import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js';
+
+        // Firebase configuration (same as React app)
+        const firebaseConfig = {
+            apiKey: "AIzaSyC5AYugEWA3kM2pIAYMTglBdkS7WpmtVTw",
+            authDomain: "tea-stall-75f69.firebaseapp.com",
+            projectId: "tea-stall-75f69",
+            storageBucket: "tea-stall-75f69.appspot.com",
+            messagingSenderId: "992180561408",
+            appId: "1:992180561408:web:25b43900a3249f2d909ae5",
+            measurementId: "G-8Y0HZSC07R"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        console.log('[VanillaJS] Firebase initialized');
+        
+        // Anonymous sign-in for development
+        signInAnonymously(auth).then(() => {
+            console.log('[VanillaJS] Signed in anonymously');
+        }).catch((error) => {
+            console.warn('[VanillaJS] Anonymous sign-in failed:', error.message);
+        });
+
+        // DOM elements
+        const productForm = document.getElementById('productForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const messageDiv = document.getElementById('message');
+        const productsList = document.getElementById('productsList');
+        const productCount = document.getElementById('productCount');
+        
+        let products = [];
+
+        // Show message
+        function showMessage(text, type = 'success') {
+            messageDiv.innerHTML = `<div class="${type}">${text}</div>`;
+            setTimeout(() => {
+                messageDiv.innerHTML = '';
+            }, 3000);
+        }
+
+        // Add product function
+        async function addProduct(productData) {
+            try {
+                console.log('[VanillaJS] Adding product:', productData);
+                const docRef = await addDoc(collection(db, 'products'), {
+                    ...productData,
+                    price: Number(productData.price),
+                    oldPrice: 0,
+                    inStock: true,
+                    createdAt: serverTimestamp()
+                });
+                console.log('[VanillaJS] Product added with ID:', docRef.id);
+                return { id: docRef.id, ...productData };
+            } catch (error) {
+                console.error('[VanillaJS] Add product error:', error);
+                throw error;
+            }
+        }
+
+        // Delete product function
+        async function deleteProduct(id) {
+            try {
+                console.log('[VanillaJS] Deleting product:', id);
+                await deleteDoc(doc(db, 'products', id));
+                console.log('[VanillaJS] Product deleted:', id);
+            } catch (error) {
+                console.error('[VanillaJS] Delete product error:', error);
+                throw error;
+            }
+        }
+
+        // Render products
+        function renderProducts() {
+            productCount.textContent = `(${products.length})`;
+            
+            if (products.length === 0) {
+                productsList.innerHTML = '<p>No products yet. Add one above!</p>';
+                return;
+            }
+
+            productsList.innerHTML = products.map(product => `
+                <div class="product-item">
+                    <div class="product-info">
+                        <div class="product-name">${product.name}</div>
+                        <div class="product-price">Price: ৳${product.price}</div>
+                        <div class="product-id">ID: ${product.id}</div>
+                    </div>
+                    <button class="delete" onclick="handleDelete('${product.id}')">Delete</button>
+                </div>
+            `).join('');
+        }
+
+        // Handle delete (global function for onclick)
+        window.handleDelete = async function(id) {
+            if (!confirm('Delete this product?')) return;
+            
+            try {
+                await deleteProduct(id);
+                showMessage('Product deleted successfully!');
+            } catch (error) {
+                showMessage('Failed to delete product: ' + error.message, 'error');
+            }
+        };
+
+        // Form submission
+        productForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const name = document.getElementById('productName').value.trim();
+            const price = document.getElementById('productPrice').value;
+            
+            if (!name || !price) return;
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Adding...';
+
+            try {
+                await addProduct({ name, price });
+                showMessage('Product added successfully!');
+                productForm.reset();
+            } catch (error) {
+                showMessage('Failed to add product: ' + error.message, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Add Product';
+            }
+        });
+
+        // Set up real-time listener
+        function setupRealtimeListener() {
+            console.log('[VanillaJS] Setting up Firestore listener');
+            
+            const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
+            
+            onSnapshot(q, (snapshot) => {
+                console.log('[VanillaJS] Received products:', snapshot.size);
+                
+                products = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                
+                renderProducts();
+            }, (error) => {
+                console.error('[VanillaJS] Listener error:', error);
+                showMessage('Failed to load products: ' + error.message, 'error');
+            });
+        }
+
+        // Initialize the app
+        setupRealtimeListener();
+    </script>
+</body>
+</html>
