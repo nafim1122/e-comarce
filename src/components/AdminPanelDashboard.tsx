@@ -18,8 +18,8 @@ import {
 import { Product, Order } from '../types';
 import ProductForm from './ProductForm';
 import { addProduct as addProductFire, deleteProduct as deleteProductFire } from '../lib/product';
-import { readLocalProducts, upsertLocalProduct, removeLocalProduct } from '../lib/local-products';
 import { listenProducts } from '../lib/firestore-products';
+import localData, { getRoleForEmail, getTheme, setTheme } from '../lib/local-data';
 import { deleteOrder, updateOrderStatus } from '../lib/order';
 import { toast } from "sonner";
 
@@ -68,29 +68,31 @@ const AdminPanelDashboard: React.FC = () => {
     } catch (e) { /* ignore */ }
   }, []);
 
-  // Load products and orders
+  // Load products and orders from local-data and subscribe to updates
   useEffect(() => {
-    // Initialize from local cache immediately
     try {
-      setProducts(readLocalProducts());
-      const savedOrders = localStorage.getItem('orders');
-      if (savedOrders) setOrders(JSON.parse(savedOrders));
+      setProducts(localData.getProducts());
+      setOrders(localData.getOrders());
     } catch (err) { console.error('[AdminPanelDashboard] init load failed', err); }
 
     // Subscribe to Firestore realtime updates (with local fallback handled in listenProducts)
     const unsub = listenProducts((items) => {
+      // keep local storage in sync but prefer local-data as canonical
       setProducts(items);
+      localData.saveProducts(items);
     }, (e) => {
       console.warn('[AdminPanelDashboard] realtime error', e);
     });
 
-    // react to local writes (fallbacks or other components)
-    const handleLocal = () => setProducts(readLocalProducts());
-    window.addEventListener('products-local-update', handleLocal);
+    const handleProductsLocal = () => setProducts(localData.getProducts());
+    const handleOrdersLocal = () => setOrders(localData.getOrders());
+    window.addEventListener('products-local-update', handleProductsLocal);
+    window.addEventListener('orders-local-update', handleOrdersLocal);
 
     return () => {
       try { unsub(); } catch (e) { /* ignore */ }
-      window.removeEventListener('products-local-update', handleLocal);
+      window.removeEventListener('products-local-update', handleProductsLocal);
+      window.removeEventListener('orders-local-update', handleOrdersLocal);
     };
   }, []);
 
@@ -132,16 +134,14 @@ const AdminPanelDashboard: React.FC = () => {
 
   const handleDeleteProduct = async (id: string | number) => {
     if (!window.confirm('Are you sure you want to delete this product?')) return;
-
     try {
-      // Remove from local state immediately
-      removeLocalProduct(id);
-      setProducts(readLocalProducts());
+      // Update local-data immediately for instant UI feedback
+      localData.deleteProductLocal(id);
+      setProducts(localData.getProducts());
 
-      // Try to delete from Firestore
-      await deleteProductFire(String(id));
-      // Ensure sockets/backends can propagate the delete
-      // (on success, nothing else required; on failure we already removed locally)
+      // Firestore delete attempt (best-effort)
+      try { await deleteProductFire(String(id)); } catch (e) { console.warn('Firestore delete failed', e); }
+
       toast.success('Product deleted successfully');
     } catch (error) {
       console.error('Delete product error:', error);
@@ -153,8 +153,11 @@ const AdminPanelDashboard: React.FC = () => {
     if (!window.confirm('Are you sure you want to delete this order?')) return;
 
     try {
-      await deleteOrder(id);
-      setOrders(prev => prev.filter(o => o.id !== id));
+      // Update local storage first for instant UI change
+      localData.deleteOrderLocal(id);
+      setOrders(localData.getOrders());
+      // Try backend delete (best-effort)
+      try { await deleteOrder(id); } catch (e) { console.warn('Backend deleteOrder failed', e); }
       toast.success('Order deleted successfully');
     } catch (error) {
       console.error('Delete order error:', error);
@@ -164,10 +167,11 @@ const AdminPanelDashboard: React.FC = () => {
 
   const handleStatusChange = async (id: string, status: string) => {
     try {
-      await updateOrderStatus(id, status);
-      setOrders(prev => prev.map(o => 
-        o.id === id ? { ...o, status: status as 'pending' | 'confirmed' | 'delivered' } : o
-      ));
+      // Update local data for immediate effect
+      localData.updateOrderStatusLocal(id, status);
+      setOrders(localData.getOrders());
+      // Propagate to backend (best effort)
+      try { await updateOrderStatus(id, status); } catch (e) { console.warn('Backend updateOrderStatus failed', e); }
       toast.success('Order status updated');
     } catch (error) {
       console.error('Update status error:', error);
@@ -176,6 +180,14 @@ const AdminPanelDashboard: React.FC = () => {
   };
 
   const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+
+  // Theme handling
+  const [theme, setLocalTheme] = useState<'light'|'dark'>(getTheme());
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    setTheme(theme);
+  }, [theme]);
 
   if (loading || checkingBackendAuth) {
     return (
@@ -276,6 +288,13 @@ const AdminPanelDashboard: React.FC = () => {
                   <span className="text-amber-600">Backend auth required for uploads</span>
                 </div>
               )}
+              <button
+                onClick={() => setLocalTheme(t => t === 'light' ? 'dark' : 'light')}
+                className="px-2 py-1 border rounded text-sm"
+                title="Toggle theme"
+              >
+                {theme === 'light' ? '🌞' : '🌙'}
+              </button>
               
               <button
                 onClick={handleLogout}
@@ -766,10 +785,8 @@ const AdminPanelDashboard: React.FC = () => {
             <div className="p-6">
               <ProductForm
                 onSaved={(product) => {
-                  const updatedProducts = [product, ...products];
-                  setProducts(updatedProducts);
-                  localStorage.setItem('products', JSON.stringify(updatedProducts));
-                  window.dispatchEvent(new Event('products-local-update'));
+                  const added = localData.addProductLocal(product);
+                  setProducts(localData.getProducts());
                   setShowAddProduct(false);
                   toast.success('Product added successfully');
                 }}
@@ -798,12 +815,8 @@ const AdminPanelDashboard: React.FC = () => {
               <ProductForm
                 initial={editingProduct}
                 onSaved={(product) => {
-                  const updatedProducts = products.map(p => 
-                    String(p.id) === String(product.id) ? product : p
-                  );
-                  setProducts(updatedProducts);
-                  localStorage.setItem('products', JSON.stringify(updatedProducts));
-                  window.dispatchEvent(new Event('products-local-update'));
+                  const updated = localData.updateProductLocal(product);
+                  setProducts(localData.getProducts());
                   setEditingProduct(null);
                   toast.success('Product updated successfully');
                 }}
