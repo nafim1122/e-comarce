@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach, Mock } from 'vitest';
 
 // Mock Firebase auth functions
@@ -91,37 +92,35 @@ describe('AdminPanelDashboard', () => {
   });
 
   it('renders admin dashboard for admin users', async () => {
-    render(<AdminPanelDashboard />);
+    render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
 
-    // Wait for async loading to finish and admin content to appear
-    // Prefer role-based query to avoid multiple cards with the same test id
-    expect(await screen.findByRole('heading', { name: /Add Product/i })).toBeInTheDocument();
-    expect(await screen.findByPlaceholderText('Name')).toBeInTheDocument();
-    expect(await screen.findByPlaceholderText('Price')).toBeInTheDocument();
+    // Dashboard now shows an overview heading and navigation
+    expect(await screen.findByRole('heading', { name: /Dashboard Overview/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Products/i })).toBeInTheDocument();
   });
 
   it('shows not allowed message for non-admin users', async () => {
     __testAuthState.value = { isAdmin: false, loading: false, user: null };
+    render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
 
-    render(<AdminPanelDashboard />);
-
-    expect(await screen.findByText(/not allowed to view this page/i)).toBeInTheDocument();
+    // The component renders an Access Denied message for non-admins
+    expect(await screen.findByText(/You don't have permission to access the admin panel/i)).toBeInTheDocument();
   });
 
   it('shows loading state when auth is loading', async () => {
     __testAuthState.value = { isAdmin: false, loading: true, user: null };
+    render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
 
-    render(<AdminPanelDashboard />);
-
-    // Should not show the not allowed message when loading
-    // use queryByText since it should be absent
-    expect(screen.queryByText(/not allowed to view this page/i)).not.toBeInTheDocument();
+    // Shows a loading state while auth is loading
+    expect(await screen.findByText(/Loading admin panel.../i)).toBeInTheDocument();
   });
 
   it('displays Add Product button for admin users', async () => {
-    render(<AdminPanelDashboard />);
+    render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
 
-    // Select the actual button (there is also a heading with the same text)
-    expect(await screen.findByRole('button', { name: /Add Product/i })).toBeInTheDocument();
+  // Navigate to Products tab to reveal the Add Product control
+  const productsNav = await screen.findByRole('button', { name: /Products/i });
+  productsNav.click();
+  expect(await screen.findByRole('button', { name: /Add Product/i })).toBeInTheDocument();
   });
 });

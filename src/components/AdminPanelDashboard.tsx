@@ -18,6 +18,8 @@ import {
 import { Product, Order } from '../types';
 import ProductForm from './ProductForm';
 import { addProduct as addProductFire, deleteProduct as deleteProductFire } from '../lib/product';
+import { readLocalProducts, upsertLocalProduct, removeLocalProduct } from '../lib/local-products';
+import { listenProducts } from '../lib/firestore-products';
 import { deleteOrder, updateOrderStatus } from '../lib/order';
 import { toast } from "sonner";
 
@@ -27,6 +29,7 @@ const AdminPanelDashboard: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders'>('dashboard');
+  const [productQuery, setProductQuery] = useState('');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [isBackendAuthenticated, setIsBackendAuthenticated] = useState(false);
@@ -55,30 +58,27 @@ const AdminPanelDashboard: React.FC = () => {
 
   // Load products and orders
   useEffect(() => {
-    const loadData = () => {
-      try {
-        const savedProducts = localStorage.getItem('products');
-        if (savedProducts) {
-          setProducts(JSON.parse(savedProducts));
-        }
+    // Initialize from local cache immediately
+    try {
+      setProducts(readLocalProducts());
+      const savedOrders = localStorage.getItem('orders');
+      if (savedOrders) setOrders(JSON.parse(savedOrders));
+    } catch (err) { console.error('[AdminPanelDashboard] init load failed', err); }
 
-        const savedOrders = localStorage.getItem('orders');
-        if (savedOrders) {
-          setOrders(JSON.parse(savedOrders));
-        }
-      } catch (error) {
-        console.error('Error loading data:', error);
-      }
-    };
+    // Subscribe to Firestore realtime updates (with local fallback handled in listenProducts)
+    const unsub = listenProducts((items) => {
+      setProducts(items);
+    }, (e) => {
+      console.warn('[AdminPanelDashboard] realtime error', e);
+    });
 
-    loadData();
+    // react to local writes (fallbacks or other components)
+    const handleLocal = () => setProducts(readLocalProducts());
+    window.addEventListener('products-local-update', handleLocal);
 
-    // Listen for product updates
-    const handleProductUpdate = () => loadData();
-    window.addEventListener('products-local-update', handleProductUpdate);
-    
     return () => {
-      window.removeEventListener('products-local-update', handleProductUpdate);
+      try { unsub(); } catch (e) { /* ignore */ }
+      window.removeEventListener('products-local-update', handleLocal);
     };
   }, []);
 
@@ -112,13 +112,13 @@ const AdminPanelDashboard: React.FC = () => {
 
     try {
       // Remove from local state immediately
-      const updatedProducts = products.filter(p => String(p.id) !== String(id));
-      setProducts(updatedProducts);
-      localStorage.setItem('products', JSON.stringify(updatedProducts));
-      window.dispatchEvent(new Event('products-local-update'));
+      removeLocalProduct(id);
+      setProducts(readLocalProducts());
 
       // Try to delete from Firestore
       await deleteProductFire(String(id));
+      // Ensure sockets/backends can propagate the delete
+      // (on success, nothing else required; on failure we already removed locally)
       toast.success('Product deleted successfully');
     } catch (error) {
       console.error('Delete product error:', error);
@@ -198,11 +198,11 @@ const AdminPanelDashboard: React.FC = () => {
               <h1 className="text-xl font-bold text-gray-800">Admin Dashboard</h1>
             </div>
             
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               {!isBackendAuthenticated && (
                 <div className="flex items-center gap-2 text-sm">
-                  <Shield className="h-4 w-4 text-yellow-500" />
-                  <span className="text-yellow-600">Backend auth required for uploads</span>
+                  <Shield className="h-4 w-4 text-amber-500" />
+                  <span className="text-amber-600">Backend auth required for uploads</span>
                 </div>
               )}
               
@@ -219,6 +219,51 @@ const AdminPanelDashboard: React.FC = () => {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-6 gap-6">
+          {/* Sidebar */}
+          <aside className="lg:col-span-1">
+            <div className="sticky top-6 bg-white border border-gray-100 rounded-lg p-4 shadow-sm">
+              <div className="mb-4">
+                <h4 className="text-sm font-semibold text-gray-700">Admin Menu</h4>
+                <p className="text-xs text-gray-500">Quick access</p>
+              </div>
+              <nav className="flex flex-col space-y-2">
+                <button
+                  onClick={() => setActiveTab('dashboard')}
+                  aria-hidden="true"
+                  className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${activeTab === 'dashboard' ? 'bg-amber-50 text-amber-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                >
+                  <TrendingUp className="h-4 w-4" />
+                  <span>Dashboard</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('products')}
+                  aria-hidden="true"
+                  className={`flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm transition-colors ${activeTab === 'products' ? 'bg-amber-50 text-amber-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Package className="h-4 w-4" />
+                    <span>Products</span>
+                  </div>
+                  <span className="text-xs bg-gray-100 px-2 py-1 rounded-md">{products.length}</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('orders')}
+                  aria-hidden="true"
+                  className={`flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm transition-colors ${activeTab === 'orders' ? 'bg-amber-50 text-amber-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Users className="h-4 w-4" />
+                    <span>Orders</span>
+                  </div>
+                  <span className="text-xs bg-gray-100 px-2 py-1 rounded-md">{orders.length}</span>
+                </button>
+              </nav>
+            </div>
+          </aside>
+
+          {/* Main column */}
+          <main className="lg:col-span-5">
         {/* Backend Authentication Section */}
         {!isBackendAuthenticated && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-8">
@@ -263,7 +308,7 @@ const AdminPanelDashboard: React.FC = () => {
                   </div>
                   <button
                     type="submit"
-                    className="bg-yellow-600 text-white px-4 py-2 rounded-md hover:bg-yellow-700 transition-colors"
+                    className="bg-amber-600 text-white px-4 py-2 rounded-full hover:bg-amber-700 shadow-sm transition-transform transform hover:-translate-y-0.5"
                   >
                     Authenticate Backend
                   </button>
@@ -273,8 +318,8 @@ const AdminPanelDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Navigation Tabs */}
-        <div className="bg-white rounded-lg shadow-sm mb-8">
+  {/* Navigation Tabs */}
+  <div className="bg-white rounded-lg shadow-sm mb-8">
           <div className="border-b border-gray-200">
             <nav className="flex space-x-8 px-6">
               <button
@@ -323,6 +368,32 @@ const AdminPanelDashboard: React.FC = () => {
 
           {/* Tab Content */}
           <div className="p-6">
+            {/* Search & actions for products tab */}
+            {activeTab === 'products' && (
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3 w-full">
+                  <input
+                    type="search"
+                    placeholder="Search products by name or category..."
+                    value={productQuery}
+                    onChange={(e) => setProductQuery(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
+                <div className="ml-4">
+                  <button
+                    onClick={() => setShowAddProduct(true)}
+                    className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-full hover:bg-emerald-700 shadow-sm transition-transform transform hover:-translate-y-0.5"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Product
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Main tab content container */}
+            <div>
             {activeTab === 'dashboard' && (
               <div className="space-y-8">
                 <div>
@@ -442,13 +513,6 @@ const AdminPanelDashboard: React.FC = () => {
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-bold text-gray-800">Products Management</h2>
-                  <button
-                    onClick={() => setShowAddProduct(true)}
-                    className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add Product
-                  </button>
                 </div>
 
                 {/* Products Table */}
@@ -471,7 +535,9 @@ const AdminPanelDashboard: React.FC = () => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                          {products.map((product) => (
+                          {products
+                            .filter(p => p.name?.toLowerCase().includes(productQuery.toLowerCase()) || (p.category || '').toLowerCase().includes(productQuery.toLowerCase()))
+                            .map((product) => (
                             <tr key={product.id} className="hover:bg-gray-50">
                               <td className="px-4 py-3">
                                 <img 
@@ -496,6 +562,7 @@ const AdminPanelDashboard: React.FC = () => {
                                     onClick={() => setEditingProduct(product)}
                                     className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
                                     title="Edit product"
+                                    aria-label="Edit product"
                                   >
                                     <Edit className="h-4 w-4" />
                                   </button>
@@ -503,6 +570,7 @@ const AdminPanelDashboard: React.FC = () => {
                                     onClick={() => handleDeleteProduct(product.id)}
                                     className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
                                     title="Delete product"
+                                    aria-label="Delete product"
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -578,6 +646,7 @@ const AdminPanelDashboard: React.FC = () => {
                                   value={order.status || 'pending'}
                                   onChange={(e) => handleStatusChange(order.id, e.target.value)}
                                   className="text-xs border rounded px-2 py-1 bg-white"
+                                  aria-label={`Order ${order.id} status`}
                                 >
                                   <option value="pending">Pending</option>
                                   <option value="confirmed">Confirmed</option>
@@ -604,8 +673,11 @@ const AdminPanelDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+    </main>
+  </div>
+</div>
 
-      {/* Add Product Modal */}
+        {/* Add Product Modal */}
       {showAddProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -614,6 +686,8 @@ const AdminPanelDashboard: React.FC = () => {
               <button
                 onClick={() => setShowAddProduct(false)}
                 className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                aria-label="Close add product modal"
+                title="Close"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -643,6 +717,8 @@ const AdminPanelDashboard: React.FC = () => {
               <button
                 onClick={() => setEditingProduct(null)}
                 className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                aria-label="Close edit product modal"
+                title="Close"
               >
                 <X className="h-5 w-5" />
               </button>

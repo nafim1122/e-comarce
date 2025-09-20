@@ -99,8 +99,46 @@ export default function ProductForm({ initial = {}, onSaved }: Props) {
       }
     } catch (err: unknown) {
       console.error(err)
-      const message = (err as { message?: string })?.message || 'Upload failed'
+      const message = (err as { message?: string })?.message || 'Upload or save failed'
       setError(message)
+      // Local fallback: if cloud upload or Firestore failed, persist to localStorage
+      // so admins can continue working offline/dev. This mirrors addProduct's
+      // VITE_FORCE_LOCAL behavior but is applied as a runtime fallback.
+      try {
+        const key = 'products'
+        const raw = localStorage.getItem(key)
+        const list: Product[] = raw ? JSON.parse(raw) : []
+        const id = initial?.id ? String(initial.id) : `local-${Date.now()}-${Math.floor(Math.random()*10000)}`
+        const item: Product = {
+          id,
+          name: name.trim(),
+          price,
+          oldPrice: initial.oldPrice ?? 0,
+          img: previewUrls[0] ?? '',
+          basePricePerKg: basePricePerKg || undefined,
+          unit,
+          kgStep: initial.kgStep ?? 0.1,
+          minQuantity: initial.minQuantity ?? (unit === 'kg' ? 0.5 : 1),
+          maxQuantity: initial.maxQuantity ?? (unit === 'kg' ? 5 : 9999),
+          description,
+          category,
+          inStock,
+          priceTiers: initial.priceTiers
+        } as Product
+        let next: Product[]
+        if (initial?.id) {
+          next = list.map(p => String(p.id) === String(initial.id) ? item : p)
+        } else {
+          next = [item, ...list]
+        }
+        localStorage.setItem(key, JSON.stringify(next))
+        try { window.dispatchEvent(new Event('products-local-update')) } catch(e) { /* ignore */ }
+        // Report to caller that we saved locally
+        onSaved?.(item)
+        setError(prev => prev ? prev + ' (saved locally)' : 'Saved locally')
+      } catch (e2) {
+        console.error('Local fallback failed', e2)
+      }
     } finally {
       setUploading(false)
     }

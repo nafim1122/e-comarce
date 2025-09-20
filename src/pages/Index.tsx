@@ -48,10 +48,12 @@ const Index = () => {
   }, [user, isAdmin]);
 
   // Keyboard shortcut: Alt + Shift + A to go to admin dashboard if admin
+  // allow either firebase-admin or backend-authenticated users
+  const displayAdmin = isAdmin || isAuthenticated;
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.altKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-        if (isAdmin) {
+        if (displayAdmin) {
           navigate('/admin-dashboard');
         } else {
           toast.error('Not authorized');
@@ -60,7 +62,7 @@ const Index = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isAdmin, navigate]);
+  }, [displayAdmin, navigate]);
 
   const handleLogout = async () => {
     try {
@@ -766,7 +768,7 @@ const Index = () => {
               <a href="#about" className="text-gray-700 hover:text-amber-600 font-medium transition-colors">
                 About
               </a>
-              {isAdmin && (
+              {(isAdmin || isAuthenticated) && (
                 <Link
                   to="/admin-dashboard"
                   className="text-gray-700 hover:text-amber-600 font-semibold transition-colors"
@@ -873,7 +875,7 @@ const Index = () => {
               >
                 About
               </a>
-              {isAdmin && (
+              {(isAdmin || isAuthenticated) && (
                 <button
                   onClick={() => { setIsMobileMenuOpen(false); navigate('/admin-dashboard'); }}
                   className="w-full text-left px-3 py-2 text-gray-700 hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors"

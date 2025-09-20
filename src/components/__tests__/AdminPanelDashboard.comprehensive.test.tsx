@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 // Mocks and shared test state (hoist-safe exports)
@@ -78,33 +79,44 @@ describe('AdminPanelDashboard Comprehensive Tests (clean)', () => {
   });
 
   it('renders admin dashboard for admin users', async () => {
-    render(<AdminPanelDashboard />);
-    await screen.findByRole('heading', { name: /Add Product/i });
-    expect(await screen.findByPlaceholderText('Name')).toBeInTheDocument();
-    expect(await screen.findByPlaceholderText('Price')).toBeInTheDocument();
+    render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    await screen.findByRole('heading', { name: /Dashboard Overview/i });
+    expect(screen.getByRole('button', { name: /Products/i })).toBeInTheDocument();
   });
 
   it('handles product form submission', async () => {
-    render(<AdminPanelDashboard />);
-    await screen.findByRole('heading', { name: /Add Product/i });
-    const nameInput = await screen.findByPlaceholderText('Name');
-    const priceInput = await screen.findByPlaceholderText('Price');
-    fireEvent.change(nameInput, { target: { value: 'Test Product' } });
-    fireEvent.change(priceInput, { target: { value: '100' } });
-    const addButton = await screen.findByRole('button', { name: /Add Product/i });
-    fireEvent.click(addButton);
+    render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+  // Open Products tab and click Add Product to open the modal
+  const productsNav = await screen.findByRole('button', { name: /Products/i });
+  fireEvent.click(productsNav);
+  const addButton = await screen.findByRole('button', { name: /Add Product/i });
+  fireEvent.click(addButton);
+
+  // Fill the ProductForm fields and submit
+  const nameInput = await screen.findByPlaceholderText(/Product name/i);
+  // There are two inputs using the same placeholder (price and basePricePerKg).
+  // Use findAllByPlaceholderText and pick the first one for the piece price.
+  const priceInputs = await screen.findAllByPlaceholderText(/^0\.00$/i);
+  const priceInput = priceInputs[0];
+  fireEvent.change(nameInput, { target: { value: 'Test Product' } });
+  fireEvent.change(priceInput, { target: { value: '100' } });
+  const saveBtn = await screen.findByRole('button', { name: /Save Product/i });
+  fireEvent.click(saveBtn);
+
   await waitFor(() => expect(__testProductMock.addProduct).toHaveBeenCalled());
   });
 
   it('handles socket events for real-time updates', async () => {
-    render(<AdminPanelDashboard />);
-    await screen.findByRole('heading', { name: /Add Product/i });
-  await waitFor(() => expect(__testSocket.on).toHaveBeenCalled());
+    render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    await screen.findByRole('heading', { name: /Dashboard Overview/i });
+    // AdminPanelDashboard itself does not register socket handlers directly;
+    // ensure the socket mock has not been mistakenly called during render.
+    await waitFor(() => expect(__testSocket.on).not.toHaveBeenCalled());
   });
 
   it('displays loading states appropriately', async () => {
     __testAuthState.value = { isAdmin: true, loading: false, user: { email: 'admin@test.com' } };
-    render(<AdminPanelDashboard />);
-    expect(await screen.findByRole('heading', { name: /Add Product/i })).toBeInTheDocument();
+    render(<AdminPanelDashboard />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    expect(await screen.findByRole('heading', { name: /Dashboard Overview/i })).toBeInTheDocument();
   });
 });

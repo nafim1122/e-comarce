@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { addProduct, updateProduct, deleteProduct, listenProducts, fetchProducts } from '../lib/firestore-products';
+import { readLocalProducts, upsertLocalProduct, removeLocalProduct } from '../lib/local-products';
 import { getSocket } from '../lib/socket';
 import type { Product } from '../types';
 import { useToast } from '../hooks/use-toast';
@@ -35,34 +36,30 @@ export default function AdminProductManager() {
     loadProducts();
     
     // Set up Firestore listener for real-time updates
-    const unsub = listenProducts(
-      (items) => {
-        setProducts(items);
-        setError(null);
-        setLoading(false);
-      },
-      (e) => {
-        console.error('[AdminProductManager] listen error', e);
-        if (!products.length) {
-          setError('Unable to connect to backend. Please check your connection.');
-        }
-      }
-    );
+    const unsub = listenProducts((items) => {
+      setProducts(items);
+      setError(null);
+      setLoading(false);
+    }, (e) => {
+      console.error('[AdminProductManager] listen error', e);
+      const cached = readLocalProducts();
+      if (!cached.length) setError('Unable to connect to backend. Please check your connection.');
+    });
     
     // Set up socket for real-time updates
     const socket = getSocket();
     if (socket) {
-      socket.on('product-update', (data) => {
-        if (data.type === 'add') {
-          setProducts(prev => [data.product, ...prev]);
-        } else if (data.type === 'update') {
-          setProducts(prev => prev.map(p => 
-            String(p.id) === String(data.product.id) ? data.product : p
-          ));
-        } else if (data.type === 'delete') {
+      type SocketPayload = { type: 'add' | 'update' | 'delete'; product?: Product; productId?: string };
+      const onProductUpdate = (data: SocketPayload) => {
+        if (data.type === 'add' && data.product) {
+          setProducts(prev => [data.product!, ...prev]);
+        } else if (data.type === 'update' && data.product) {
+          setProducts(prev => prev.map(p => String(p.id) === String(data.product!.id) ? data.product! : p));
+        } else if (data.type === 'delete' && data.productId) {
           setProducts(prev => prev.filter(p => String(p.id) !== String(data.productId)));
         }
-      });
+      };
+      socket.on('product-update', onProductUpdate);
     }
     
     return () => {
@@ -82,14 +79,12 @@ export default function AdminProductManager() {
     
     try {
       setLoading(true);
-      const created = await addProduct({ 
-        name, 
-        price: Number(price), 
-        description, 
-        category,
-        img: imageUrl,
-        inStock: true
-      });
+      const created = await addProduct({ name, price: Number(price), description, category, img: imageUrl, inStock: true });
+      // addProduct returns a Product with id; update local cache immediately
+      try {
+        upsertLocalProduct(created as Product);
+        setProducts(readLocalProducts());
+      } catch(e) { console.warn('[handleAdd] local upsert failed', e); }
       console.log('Product added', created);
       toast({ title: 'Success', description: 'Product added successfully' });
       resetForm();
@@ -113,13 +108,8 @@ export default function AdminProductManager() {
     
     try {
       setLoading(true);
-      await updateProduct(p.id as string, { 
-        name: p.name, 
-        price: p.price,
-        description: p.description,
-        category: p.category,
-        img: p.img
-      });
+      const updated = await updateProduct(p.id as string, { name: p.name, price: p.price, description: p.description, category: p.category, img: p.img });
+      try { upsertLocalProduct(updated as Product); setProducts(readLocalProducts()); } catch(e) { console.warn('[handleUpdate] local upsert failed', e); }
       console.log('Product updated', p.id);
       toast({ title: 'Success', description: 'Product updated successfully' });
       resetForm();
@@ -138,7 +128,10 @@ export default function AdminProductManager() {
   async function handleDelete(id: string) {
     try {
       setLoading(true);
-      await deleteProduct(id); 
+      // remove locally first for instant UI update
+      removeLocalProduct(id);
+      setProducts(readLocalProducts());
+      await deleteProduct(id);
       console.log('Deleted', id);
       toast({ title: 'Success', description: 'Product deleted successfully' });
     } catch (err) { 

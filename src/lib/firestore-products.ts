@@ -108,25 +108,72 @@ export function listenProducts(onChange: (items: Product[]) => void, onError?: (
       }
     }
     
-    // Set up Firestore listener
+    // Set up Firestore listener with simple retry/backoff on errors
     const q = query(productsCollection(), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, snap => {
-      const items: Product[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as DocumentData) })) as unknown as Product[];
-      
-      // Update localStorage for offline fallback
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('products', JSON.stringify(items));
-        } catch (localErr) {
-          console.warn('[listenProducts] Failed to save to localStorage:', localErr);
-        }
+    let retryAttempts = 0;
+    const maxRetries = 3;
+    const baseDelay = 2000; // ms
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsub: (() => void) | null = null;
+
+    const setupListener = () => {
+      try {
+        unsub = onSnapshot(q, snap => {
+          const items: Product[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as DocumentData) })) as unknown as Product[];
+
+          // Update localStorage for offline fallback
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('products', JSON.stringify(items));
+            } catch (localErr) {
+              console.warn('[listenProducts] Failed to save to localStorage:', localErr);
+            }
+          }
+          // reset retry attempts on successful snapshot
+          retryAttempts = 0;
+          onChange(items);
+        }, e => {
+          console.error('[listenProducts] snapshot error', e);
+          if (onError) onError(e);
+
+          // Fallback to cached products if available
+          if (typeof window !== 'undefined') {
+            try {
+              const localProducts = localStorage.getItem('products');
+              if (localProducts) {
+                onChange(JSON.parse(localProducts) as Product[]);
+              }
+            } catch (localErr) {
+              console.warn('[listenProducts] Failed to load from localStorage on error:', localErr);
+            }
+          }
+
+          // schedule a retry with exponential backoff
+          if (retryAttempts < maxRetries) {
+            const delay = baseDelay * Math.pow(2, retryAttempts);
+            retryTimer = setTimeout(() => {
+              retryAttempts += 1;
+              setupListener();
+            }, delay);
+          }
+        });
+      } catch (err) {
+        console.error('[listenProducts] setup error', err);
+        if (onError) onError(err as Error);
       }
-      onChange(items);
-    }, e => {
-      console.error('[listenProducts] snapshot error', e);
-      if (onError) onError(e);
-    });
-    return unsub;
+    };
+
+    setupListener();
+
+    // Return a cleanup function that clears timers and unsubscribes
+    return () => {
+      try {
+        if (unsub) unsub();
+      } catch (e) {
+        // ignore
+      }
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   } catch (err) {
     console.error('[listenProducts] setup error', err);
     if (onError) onError(err);
